@@ -95,7 +95,7 @@ def main():
     parser.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析")
     args = parser.parse_args()
 
-    batch_id = datetime.now().strftime(f"%Y%m%d_%H%M%S_{args.keyword.replace(' ', '_')}")
+    batch_id = datetime.now().strftime("%m%d_%H%M") + "_" + args.keyword.replace(" ", "_")
     keyword = args.keyword
     sources = [s.strip() for s in args.sources.split(",")]
 

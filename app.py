@@ -1,6 +1,6 @@
 """
-家纺情报 · 桌面助手 v3
-按批次管理搜索记录，点击批次打开 HTML 看板，市场分析独立按钮
+跨境产品情报 · 桌面助手 v4
+按批次管理搜索记录，可选择数据源，复制批次号
 """
 import tkinter as tk
 from tkinter import ttk
@@ -10,17 +10,33 @@ from datetime import datetime
 
 ROOT = Path(__file__).resolve().parent
 
+ALL_SOURCES = [
+    ("reddit",  "🔴 Reddit"),
+    ("twitter", "🐦 X"),
+    ("tiktok",  "🎵 TikTok"),
+    ("amazon",  "📦 Amazon"),
+    ("shein",   "👗 SHEIN"),
+]
+
 
 def bg(cmd, timeout=300):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=ROOT)
     return r.stdout, r.stderr
 
 
+def short_bid(bid):
+    """展示用截短：只保留 月日_时分_关键词 部分"""
+    parts = bid.split("_")
+    if len(parts) >= 3:
+        return f"{parts[0]}_{parts[1]}_{parts[-1]}"
+    return bid
+
+
 class App:
     def __init__(self):
         self.win = tk.Tk()
         self.win.title("🌐 跨境产品情报助手")
-        self.win.geometry("700x520")
+        self.win.geometry("720x540")
         self.win.configure(bg="#0f172a")
         self.win.option_add("*Font", ("Segoe UI", 10))
 
@@ -31,30 +47,44 @@ class App:
         top.pack(fill="x", padx=14, pady=(14, 4))
 
         tk.Label(top, text="关键词", fg="#64748b", bg=self.bg).pack(side="left")
-        self.kw = tk.Entry(top, width=20, bg="#1e293b", fg=self.fg,
+        self.kw = tk.Entry(top, width=18, bg="#1e293b", fg=self.fg,
                            insertbackground=self.fg, relief="flat", bd=8)
-        self.kw.pack(side="left", padx=(6, 10))
+        self.kw.pack(side="left", padx=(6, 8))
         self.kw.insert(0, "cooling sheets")
 
         tk.Label(top, text="排序", fg="#64748b", bg=self.bg).pack(side="left")
         self.sort_v = tk.StringVar(value="likes")
         ttk.Combobox(top, textvariable=self.sort_v, values=["likes", "comments"],
-                     width=7, state="readonly").pack(side="left", padx=(6, 10))
+                     width=6, state="readonly").pack(side="left", padx=(6, 8))
 
         tk.Label(top, text="条数", fg="#64748b", bg=self.bg).pack(side="left")
         self.limit_v = tk.StringVar(value="10")
         tk.Spinbox(top, from_=3, to=50, textvariable=self.limit_v,
-                   width=4, bg="#1e293b", fg=self.fg,
-                   buttonbackground="#334155", relief="flat", bd=6).pack(side="left", padx=(6, 10))
+                   width=3, bg="#1e293b", fg=self.fg,
+                   buttonbackground="#334155", relief="flat", bd=6).pack(side="left", padx=(6, 8))
 
         self.btn = tk.Button(top, text="🔍 搜索", command=self.search,
                              bg="#3b82f6", fg="white", font=(None, 10, "bold"),
                              relief="flat", padx=14, pady=3, cursor="hand2")
         self.btn.pack(side="left")
 
+        # ── 数据源选择 ──
+        src_frame = tk.Frame(self.win, bg=self.bg)
+        src_frame.pack(fill="x", padx=14, pady=(2, 4))
+        tk.Label(src_frame, text="数据源:", fg="#64748b", bg=self.bg).pack(side="left")
+        self.src_vars = {}
+        for key, label in ALL_SOURCES:
+            var = tk.BooleanVar(value=True)
+            self.src_vars[key] = var
+            cb = tk.Checkbutton(src_frame, text=label, variable=var,
+                                bg=self.bg, fg="#94a3b8", selectcolor="#0f172a",
+                                activebackground=self.bg, activeforeground="#e2e8f0",
+                                relief="flat", bd=0, padx=0, highlightthickness=0)
+            cb.pack(side="left", padx=(6, 0))
+
         # ── 搜索记录标题 ──
         hdr = tk.Frame(self.win, bg=self.bg)
-        hdr.pack(fill="x", padx=14, pady=(10, 2))
+        hdr.pack(fill="x", padx=14, pady=(6, 2))
         tk.Label(hdr, text="📋 搜索记录", fg="#94a3b8",
                  font=(None, 11, "bold"), bg=self.bg).pack(side="left")
 
@@ -65,7 +95,7 @@ class App:
         cols = ("批次", "关键词", "日期", "条数")
         self.tree = ttk.Treeview(lst_frame, columns=cols, show="headings",
                                   selectmode="browse", height=12)
-        for c, w in zip(cols, [60, 150, 120, 60]):
+        for c, w in zip(cols, [120, 140, 80, 50]):
             self.tree.heading(c, text=c)
             self.tree.column(c, width=w, anchor="w")
 
@@ -77,6 +107,7 @@ class App:
         self.tree.bind("<Double-1>", self.open_batch)
         self.tree.bind("<Return>", self.open_batch)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
+        self.tree.bind("<Button-3>", self.copy_bid)  # 右键复制
 
         # ── 底部按钮 ──
         bot = tk.Frame(self.win, bg="#1e293b")
@@ -93,12 +124,15 @@ class App:
                                       relief="flat", padx=10, pady=2, state="disabled")
         self.analysis_btn.pack(side="left", padx=2)
 
+        tk.Button(frm, text="📋 复制批次号", command=self.copy_bid,
+                  bg="#334155", fg="#94a3b8", relief="flat", padx=10, pady=2).pack(side="left", padx=2)
+
         tk.Button(frm, text="🔄 刷新", command=self.refresh,
                   bg="#334155", fg="#94a3b8", relief="flat", padx=10, pady=2).pack(side="left", padx=2)
 
         # 数据
         self.batch_ids = []
-        self.analysis_cache = set()  # batch_ids 已有分析
+        self.analysis_cache = set()
         self.win.bind("<Escape>", lambda e: self.win.quit())
         self.refresh()
 
@@ -108,19 +142,39 @@ class App:
         self.stat.config(text=msg)
         self.win.update_idletasks()
 
+    def _selected_bid(self):
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        idx = self.tree.index(sel[0])
+        return self.batch_ids[idx] if idx < len(self.batch_ids) else None
+
+    def _selected_bid_short(self):
+        sel = self.tree.selection()
+        if not sel:
+            return ""
+        vals = self.tree.item(sel[0], "values")
+        return vals[0] if vals else ""
+
     def search(self):
         kw = self.kw.get().strip()
         if not kw:
             return self.log("⚠️ 输入关键词")
+        # 收集选中的源
+        selected = [k for k, v in self.src_vars.items() if v.get()]
+        if not selected:
+            return self.log("⚠️ 至少勾选一个数据源")
+        sources_str = ",".join(selected)
+
         self.btn.config(state="disabled", text="⏳ 搜索中...")
-        self.log(f"🔍 搜索: {kw}")
+        self.log(f"🔍 搜索: {kw} ({len(selected)} 源)")
 
         def work():
             try:
                 sort, limit = self.sort_v.get(), self.limit_v.get()
                 bg([sys.executable, "main.py", "--keyword", kw,
                      "--sort", sort, "--limit", limit,
-                     "--sources", "reddit,twitter,tiktok,amazon,shein"])
+                     "--sources", sources_str])
 
                 # 生成批次看板
                 conn = sqlite3.connect(str(ROOT / "db" / "textiles.db"))
@@ -179,7 +233,8 @@ class App:
                 bid, kw, dt, cnt = r[0], r[1] or "(空)", r[2] or "?", r[3]
                 tag = bid.split("_")[-1] if "_" in bid else ""
                 display_kw = kw if kw != "(空)" else tag.replace("_", " ")
-                self.tree.insert("", "end", values=(bid[:20], display_kw, dt, cnt))
+                display_bid = short_bid(bid)
+                self.tree.insert("", "end", values=(display_bid, display_kw, dt, cnt))
                 self.batch_ids.append(bid)
 
             self.log(f"📋 {len(rows)} 条搜索记录")
@@ -190,15 +245,16 @@ class App:
 
     def on_select(self, event=None):
         self._update_analysis_btn()
+        # 在状态栏显示完整批次号
+        bid = self._selected_bid()
+        if bid:
+            self.log(f"📋 {bid}")
 
     def _update_analysis_btn(self):
-        """根据选中批次是否有分析结果，切换按钮明暗"""
-        sel = self.tree.selection()
-        if not sel:
+        bid = self._selected_bid()
+        if not bid:
             self.analysis_btn.config(state="disabled", fg="#475569")
             return
-        idx = self.tree.index(sel[0])
-        bid = self.batch_ids[idx]
         has_analysis = bid in self.analysis_cache
         self.analysis_btn.config(
             state="normal",
@@ -207,13 +263,10 @@ class App:
         )
 
     def open_batch(self, event=None):
-        sel = self.tree.selection()
-        if not sel:
+        bid = self._selected_bid()
+        if not bid:
             return
-        idx = self.tree.index(sel[0])
-        bid = self.batch_ids[idx]
 
-        # 检查批次 HTML 是否存在，不存在则生成
         html_path = ROOT / "reports" / f"batch_{bid}.html"
         if not html_path.exists():
             self.log(f"⏳ 生成批次看板...")
@@ -224,25 +277,30 @@ class App:
                 return
 
         webbrowser.open(str(html_path))
-        self.log(f"📂 已打开: {bid[:25]}...")
+        self.log(f"📂 已打开: {bid}")
+
+    def copy_bid(self, event=None):
+        bid = self._selected_bid()
+        if not bid:
+            return self.log("⚠️ 请先选中一个批次")
+        self.win.clipboard_clear()
+        self.win.clipboard_append(bid)
+        self.log(f"📋 已复制: {bid}")
 
     def run_analysis(self):
-        sel = self.tree.selection()
-        if not sel:
+        bid = self._selected_bid()
+        if not bid:
             return self.log("请先选中一个批次")
-        idx = self.tree.index(sel[0])
-        bid = self.batch_ids[idx]
 
-        # 检查分析报告是否已存在
         report_path = ROOT / "reports" / f"analysis_{bid}.html"
         if report_path.exists() and bid in self.analysis_cache:
             webbrowser.open(str(report_path))
-            self.log(f"📂 打开分析报告: {bid[:25]}...")
+            self.log(f"📂 打开分析报告: {bid}")
             return
 
         # 开始分析
         self.analysis_btn.config(state="disabled", text="⏳ 分析中...")
-        self.log(f"🕶️ 市场分析: {bid[:25]}...")
+        self.log(f"🕶️ 市场分析: {bid}...")
 
         def work():
             try:
@@ -250,9 +308,8 @@ class App:
                 analysis_js = str(ROOT / "router" / "src" / "analysis.js")
                 out, err = bg([node, analysis_js, "--batch", bid], timeout=300)
 
-                # 检查是否成功
                 if "分析完成" in out:
-                    self.win.after(0, lambda: self.log(f"✅ 分析完成 (batch: {bid[:20]}...)"))
+                    self.win.after(0, lambda: self.log(f"✅ 分析完成 ({bid})"))
                     self.win.after(0, lambda: self.refresh())
                     self.win.after(0, lambda: webbrowser.open(str(report_path)))
                 elif err:
@@ -270,7 +327,6 @@ class App:
 
 
 def shutil_which(name):
-    """简易 which 查找"""
     for p in os.environ.get("PATH", "").split(os.pathsep):
         fp = os.path.join(p, name)
         if os.path.isfile(fp) and os.access(fp, os.X_OK):
