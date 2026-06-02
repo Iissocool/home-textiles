@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS raw_posts (
     tags        TEXT,                   -- JSON array of extracted tags
     metadata    TEXT,                   -- JSON extra fields
     image_url   TEXT DEFAULT '',        -- 文章/商品配图
+    batch_id    TEXT DEFAULT '',        -- 搜索批次标记 (YYYYMMDD_HHMMSS_keyword)
+    search_keyword TEXT DEFAULT '',     -- 搜索关键词
     UNIQUE(source, source_id)
 );
 

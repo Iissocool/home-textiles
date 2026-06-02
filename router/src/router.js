@@ -365,6 +365,7 @@ function weekTimestamp() {
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
+  const batchId = process.argv.includes("--batch") ? process.argv[process.argv.indexOf("--batch") + 1] : null;
   console.log(`\n🤖 Home Textiles Intelligence Router`);
   console.log(`   Model: ${MODEL}`);
   console.log(`   DB:    ${DB_PATH}`);
@@ -392,11 +393,23 @@ async function main() {
     process.exit(1);
   }
 
-  // 读取本周数据（双通道）
-  const { start, end } = weekTimestamp();
-  const socialPosts = getPostsBySource(db, start, end, SOCIAL_SOURCES);
-  const ecomPosts = getPostsBySource(db, start, end, ECOM_SOURCES);
-  console.log(`📊 Social posts: ${socialPosts.length} | E-commerce: ${ecomPosts.length}`);
+  // 读取数据
+  let socialPosts, ecomPosts;
+  if (batchId) {
+    // 按 batch 查询
+    const sql = `SELECT id,source,title,content,score,num_comments,tags,metadata
+                 FROM raw_posts WHERE batch_id=? ORDER BY score DESC LIMIT 200`;
+    const all = db.prepare(sql).all(batchId);
+    socialPosts = all.filter(p => SOCIAL_SOURCES.includes(p.source));
+    ecomPosts = all.filter(p => ECOM_SOURCES.includes(p.source));
+    console.log(`📊 Batch: ${batchId} — Social: ${socialPosts.length} | E-commerce: ${ecomPosts.length}`);
+  } else {
+    // 本周数据
+    const { start, end } = weekTimestamp();
+    socialPosts = getPostsBySource(db, start, end, SOCIAL_SOURCES);
+    ecomPosts = getPostsBySource(db, start, end, ECOM_SOURCES);
+    console.log(`📊 Social posts: ${socialPosts.length} | E-commerce: ${ecomPosts.length}`);
+  }
 
   if (dryRun) {
     console.log("\n[Dry Run — Social]");

@@ -46,8 +46,9 @@ def insert_raw_post(conn: sqlite3.Connection, post: dict) -> bool:
         conn.execute(
             """INSERT OR IGNORE INTO raw_posts
                (source, source_id, title, content, url, author,
-                score, num_comments, created_utc, fetched_at, tags, metadata, image_url)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?, ?, ?)""",
+                score, num_comments, created_utc, fetched_at, tags, metadata, image_url,
+                batch_id, search_keyword)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?, ?, ?, ?, ?)""",
             (
                 post["source"],
                 post["source_id"],
@@ -61,6 +62,8 @@ def insert_raw_post(conn: sqlite3.Connection, post: dict) -> bool:
                 json.dumps(post.get("tags", [])),
                 json.dumps(post.get("metadata", {})),
                 post.get("image_url", ""),
+                post.get("batch_id", ""),
+                post.get("search_keyword", ""),
             ),
         )
         conn.commit()

@@ -28,6 +28,8 @@ class RawPost:
     tags: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     image_url: str = ""
+    batch_id: str = ""
+    search_keyword: str = ""
 
     def to_dict(self) -> dict:
         d = asdict(self)
