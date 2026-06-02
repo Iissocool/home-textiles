@@ -45,6 +45,19 @@ class SheinScraper(BaseScraper):
         self._opencli("tab", "select", page_id)
         time.sleep(5)
 
+        # 检测人机验证页面
+        check = self._opencli("eval", """document.title.toLowerCase()""")
+        if isinstance(check, str) and any(k in check for k in ("captcha", "verify", "robot", "human", "challenge", "security")):
+            logger.warning(f"SHEIN 人机验证触发，等待 15 秒后重试...")
+            time.sleep(15)
+            # 尝试重新导航
+            self._opencli("open", url)
+            time.sleep(5)
+            check2 = self._opencli("eval", """document.title.toLowerCase()""")
+            if isinstance(check2, str) and any(k in check2 for k in ("captcha", "verify", "robot")):
+                logger.error("SHEIN 人机验证无法绕过，跳过该关键词")
+                return []
+
         # 从 JSON-LD 结构化数据提取（含价格）
         raw = self._opencli("eval", """
 (function() {
@@ -95,17 +108,21 @@ return "[]";
                     price = float(price_str)
                 except:
                     price = 0.0
+                # 修复 SHEIN 图片 URL：去掉 OpenCLI 产生的多余域名，补全协议
+                raw_img = item.get("image", "") or ""
+                if raw_img.startswith("https://us.shein.com/"):
+                    img_url = raw_img.replace("us.shein.com/", "")
+                elif raw_img.startswith("//"):
+                    img_url = "https:" + raw_img
+                else:
+                    img_url = raw_img
                 post = RawPost(
                     source="shein",
                     source_id=f"shen_{hash(item.get('url','') + title) & 0x7FFFFFFF}",
                     title=title[:200],
                     content=f"Price: ${price:.2f}",
                     url=item.get("url", ""),
-                    image_url=item.get("image", "").replace(
-                        "us.shein.com//img.", "img."  # OpenCLI 解析相对路径产生的多余域名
-                    ).replace(
-                        "//img.ltwebstatic.com", "https://img.ltwebstatic.com"  # 补全协议
-                    ),
+                    image_url=img_url,
                     author="SHEIN",
                     score=int(price),
                     tags=[term, "shein"],
