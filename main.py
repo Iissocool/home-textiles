@@ -87,7 +87,7 @@ def _save_batch(posts: list, batch_id: str, keyword: str, conn) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="🏠 家纺情报 · 按需研究工具")
+    parser = argparse.ArgumentParser(description="🌐 跨境产品情报 · 按需研究工具")
     parser.add_argument("--keyword", required=True, help="搜索关键词 (e.g. 'cooling sheets')")
     parser.add_argument("--sources", default="reddit,twitter,tiktok,amazon,shein", help="数据源，逗号分隔")
     parser.add_argument("--limit", type=int, default=15, help="最终保留条数/源")
@@ -99,7 +99,7 @@ def main():
     keyword = args.keyword
     sources = [s.strip() for s in args.sources.split(",")]
 
-    print(f"\n🏠 家纺情报 · 按需研究")
+    print(f"\n🌐 跨境产品情报 · 按需研究")
     print(f"{'='*50}")
     print(f"  关键词: {keyword}")
     print(f"  数据源: {', '.join(sources)}")

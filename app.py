@@ -19,7 +19,7 @@ def bg(cmd, timeout=300):
 class App:
     def __init__(self):
         self.win = tk.Tk()
-        self.win.title("🏠 家纺情报助手")
+        self.win.title("🌐 跨境产品情报助手")
         self.win.geometry("700x520")
         self.win.configure(bg="#0f172a")
         self.win.option_add("*Font", ("Segoe UI", 10))

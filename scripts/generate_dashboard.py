@@ -129,7 +129,7 @@ h1{{text-align:center;font-size:20px;margin-bottom:2px}}
 </style>
 </head>
 <body>
-<h1>🏠 家纺情报面板</h1>
+<h1>🌐 跨境产品情报面板</h1>
 <div class="hdr">{now} · 点击标题打开原文</div>
 <div class="stats">{stats_html}</div>
 <div class="bar">

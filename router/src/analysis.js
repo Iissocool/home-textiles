@@ -56,7 +56,7 @@ const openai = new OpenAI({
 });
 
 // 角色设定
-const SYSTEM_PROMPT = `You are Black Pearl, an expert e-commerce data analyst specializing in identifying product opportunities for independent, private domain traffic channels. Your task is to cross-reference social media demand against existing e-commerce supply.
+const SYSTEM_PROMPT = `You are Black Pearl, an expert e-commerce data analyst specializing in identifying product opportunities for independent, private domain traffic channels. Your task is to cross-reference social media demand against existing e-commerce supply across any product category.
 Respond ONLY with valid JSON. No markdown, no explanations outside JSON.`;
 
 // ============================================================
@@ -195,10 +195,10 @@ function buildEcomPrompt(data) {
 // 4 步 prompt 链
 // ============================================================
 
-async function step1_DemandAnalysis(db, data) {
+async function step1_DemandAnalysis(db, data, keyword) {
   console.log("[Analysis] Step 1: Demand Analysis (social)...");
   const socialText = buildSocialPrompt(data);
-  const prompt = `Analyze these social media posts about home textiles. Identify:
+  const prompt = `Analyze these social media posts about "${keyword}". Identify:
 
 1. **emerging_trends** (array): Top 3-5 rising trends, each with a name, strength (high/medium/low), and evidence from posts
 2. **pain_points** (array): Common consumer frustrations mentioned (e.g., "sheets wrinkle", "too hot", "cheap fabric")
@@ -217,10 +217,10 @@ Respond with a JSON object with keys: emerging_trends, pain_points, aesthetic_de
   return { json: parsed, cost: result.cost };
 }
 
-async function step2_SupplyAnalysis(db, data) {
+async function step2_SupplyAnalysis(db, data, keyword) {
   console.log("[Analysis] Step 2: Supply Analysis (ecom)...");
   const ecomText = buildEcomPrompt(data);
-  const prompt = `Analyze these e-commerce product listings for home textiles. Identify:
+  const prompt = `Analyze these e-commerce product listings for "${keyword}". Identify:
 
 1. **market_landscape** (object): For each category found, note price range, avg rating, and density (crowded/competitive/fragmented)
 2. **product_gaps** (array): Features or price points that seem underserved
@@ -299,7 +299,7 @@ Output ONLY a JSON object with these exact keys:
 // HTML 报告生成
 // ============================================================
 
-function generateHTML(batchId, step1, step2, step3, step4, totalCost, data) {
+function generateHTML(batchId, keyword, step1, step2, step3, step4, totalCost, data) {
   // 统计各 source 数据量
   const counts = {};
   let totalItems = 0;
@@ -379,7 +379,7 @@ function generateHTML(batchId, step1, step2, step3, step4, totalCost, data) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Black Pearl · 市场分析</title>
+<title>Black Pearl · ${escapeHTML(keyword)}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#020617;color:#e2e8f0;font-family:Inter,sans-serif;padding:20px;max-width:800px;margin:auto}
@@ -507,6 +507,11 @@ async function main() {
   // 1. 读取批次数据
   console.log("\n📡 读取数据...");
   const data = queryBatchData(db, batchId);
+
+  // 读取该批次的关键词
+  const kwRow = db.prepare("SELECT search_keyword FROM raw_posts WHERE batch_id=? AND search_keyword!='' LIMIT 1").get(batchId);
+  const keyword = kwRow ? kwRow.search_keyword : batchId.split("_").slice(2).join(" ");
+  console.log(`   关键词: ${keyword}`);
   let totalItems = 0;
   for (const src of [...SOCIAL_SOURCES, ...ECOM_SOURCES]) {
     const n = (data[src] || []).length;
@@ -523,10 +528,10 @@ async function main() {
   // 2. 执行 4 步分析
   let totalCost = 0;
 
-  const r1 = await step1_DemandAnalysis(db, data);
+  const r1 = await step1_DemandAnalysis(db, data, keyword);
   totalCost += r1.cost;
 
-  const r2 = await step2_SupplyAnalysis(db, data);
+  const r2 = await step2_SupplyAnalysis(db, data, keyword);
   totalCost += r2.cost;
 
   const r3 = await step3_CrossReference(db, r1.json, r2.json);
@@ -555,7 +560,7 @@ async function main() {
 
   // 4. 生成 HTML 报告
   console.log("📄 生成 HTML 报告...");
-  const html = generateHTML(batchId, r1, r2, r3, r4, totalCost, data);
+  const html = generateHTML(batchId, keyword, r1, r2, r3, r4, totalCost, data);
   const outPath = path.join(REPORTS_DIR, `analysis_${batchId}.html`);
   fs.writeFileSync(outPath, html, "utf-8");
   console.log(`   → file://${outPath}`);
