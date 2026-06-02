@@ -1,6 +1,6 @@
 """
-家纺情报 · 桌面助手 v2
-按批次管理搜索记录，点击批次打开 HTML 看板，LLM 分析独立操作
+家纺情报 · 桌面助手 v3
+按批次管理搜索记录，点击批次打开 HTML 看板，市场分析独立按钮
 """
 import tkinter as tk
 from tkinter import ttk
@@ -11,7 +11,7 @@ from datetime import datetime
 ROOT = Path(__file__).resolve().parent
 
 
-def bg(cmd, timeout=180):
+def bg(cmd, timeout=300):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=ROOT)
     return r.stdout, r.stderr
 
@@ -76,6 +76,7 @@ class App:
 
         self.tree.bind("<Double-1>", self.open_batch)
         self.tree.bind("<Return>", self.open_batch)
+        self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
         # ── 底部按钮 ──
         bot = tk.Frame(self.win, bg="#1e293b")
@@ -87,16 +88,17 @@ class App:
         frm = tk.Frame(bot, bg="#1e293b")
         frm.pack(side="right", padx=6)
 
-        self.llm_btn = tk.Button(frm, text="🤖 LLM 分析选中批次",
-                                  command=self.run_llm, bg="#334155", fg="#94a3b8",
-                                  relief="flat", padx=10, pady=2, state="disabled")
-        self.llm_btn.pack(side="left", padx=2)
+        self.analysis_btn = tk.Button(frm, text="🕶️ 市场分析",
+                                      command=self.run_analysis, bg="#334155", fg="#475569",
+                                      relief="flat", padx=10, pady=2, state="disabled")
+        self.analysis_btn.pack(side="left", padx=2)
 
         tk.Button(frm, text="🔄 刷新", command=self.refresh,
                   bg="#334155", fg="#94a3b8", relief="flat", padx=10, pady=2).pack(side="left", padx=2)
 
         # 数据
         self.batch_ids = []
+        self.analysis_cache = set()  # batch_ids 已有分析
         self.win.bind("<Escape>", lambda e: self.win.quit())
         self.refresh()
 
@@ -145,6 +147,7 @@ class App:
     def refresh(self):
         self.tree.delete(*self.tree.get_children())
         self.batch_ids.clear()
+        self.analysis_cache.clear()
 
         try:
             conn = sqlite3.connect(str(ROOT / "db" / "textiles.db"))
@@ -158,6 +161,18 @@ class App:
                 ORDER BY MAX(id) DESC
                 LIMIT 50
             """).fetchall()
+
+            # 查哪些 batch 已有分析
+            bids = [r[0] for r in rows]
+            if bids:
+                placeholders = ",".join("?" for _ in bids)
+                analyzed = set(
+                    r[0] for r in conn.execute(
+                        f"SELECT batch_id FROM llm_analyses WHERE batch_id IN ({placeholders})",
+                        bids
+                    ).fetchall()
+                )
+                self.analysis_cache = analyzed
             conn.close()
 
             for r in rows:
@@ -170,6 +185,26 @@ class App:
             self.log(f"📋 {len(rows)} 条搜索记录")
         except Exception as e:
             self.log(f"❌ 读取记录失败: {e}")
+
+        self._update_analysis_btn()
+
+    def on_select(self, event=None):
+        self._update_analysis_btn()
+
+    def _update_analysis_btn(self):
+        """根据选中批次是否有分析结果，切换按钮明暗"""
+        sel = self.tree.selection()
+        if not sel:
+            self.analysis_btn.config(state="disabled", fg="#475569")
+            return
+        idx = self.tree.index(sel[0])
+        bid = self.batch_ids[idx]
+        has_analysis = bid in self.analysis_cache
+        self.analysis_btn.config(
+            state="normal",
+            fg="#60a5fa" if has_analysis else "#94a3b8",
+            text="🕶️ 市场分析" if has_analysis else "🕶️ 开始分析"
+        )
 
     def open_batch(self, event=None):
         sel = self.tree.selection()
@@ -191,28 +226,56 @@ class App:
         webbrowser.open(str(html_path))
         self.log(f"📂 已打开: {bid[:25]}...")
 
-    def run_llm(self):
+    def run_analysis(self):
         sel = self.tree.selection()
         if not sel:
             return self.log("请先选中一个批次")
         idx = self.tree.index(sel[0])
         bid = self.batch_ids[idx]
 
-        self.llm_btn.config(state="disabled", text="⏳ LLM 分析中...")
-        self.log(f"🤖 LLM 分析批次: {bid[:25]}...")
+        # 检查分析报告是否已存在
+        report_path = ROOT / "reports" / f"analysis_{bid}.html"
+        if report_path.exists() and bid in self.analysis_cache:
+            webbrowser.open(str(report_path))
+            self.log(f"📂 打开分析报告: {bid[:25]}...")
+            return
+
+        # 开始分析
+        self.analysis_btn.config(state="disabled", text="⏳ 分析中...")
+        self.log(f"🕶️ 市场分析: {bid[:25]}...")
 
         def work():
             try:
-                bg(["node", "router/src/router.js", "--batch", bid], timeout=120)
-                self.win.after(0, lambda: self.log(f"✅ LLM 分析完成 (batch: {bid[:20]}...)"))
+                node = shutil_which("node") or "/usr/bin/node"
+                analysis_js = str(ROOT / "router" / "src" / "analysis.js")
+                out, err = bg([node, analysis_js, "--batch", bid], timeout=300)
+
+                # 检查是否成功
+                if "分析完成" in out:
+                    self.win.after(0, lambda: self.log(f"✅ 分析完成 (batch: {bid[:20]}...)"))
+                    self.win.after(0, lambda: self.refresh())
+                    self.win.after(0, lambda: webbrowser.open(str(report_path)))
+                elif err:
+                    self.win.after(0, lambda: self.log(f"❌ 分析失败: {err[:80]}"))
+                else:
+                    self.win.after(0, lambda: self.log(f"❌ 分析异常，请查看输出"))
             except Exception as e:
-                self.win.after(0, lambda: self.log(f"❌ LLM 失败: {e}"))
-            self.win.after(0, lambda: self.llm_btn.config(state="normal", text="🤖 LLM 分析选中批次"))
+                self.win.after(0, lambda: self.log(f"❌ 分析异常: {e}"))
+            self.win.after(0, lambda: self.analysis_btn.config(text="🕶️ 市场分析"))
 
         threading.Thread(target=work, daemon=True).start()
 
     def run(self):
         self.win.mainloop()
+
+
+def shutil_which(name):
+    """简易 which 查找"""
+    for p in os.environ.get("PATH", "").split(os.pathsep):
+        fp = os.path.join(p, name)
+        if os.path.isfile(fp) and os.access(fp, os.X_OK):
+            return fp
+    return None
 
 
 if __name__ == "__main__":

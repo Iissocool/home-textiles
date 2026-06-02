@@ -61,3 +61,17 @@ CREATE TABLE IF NOT EXISTS post_comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON post_comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_source ON post_comments(source);
+
+-- LLM 分析结果（四步 prompt 链的产出）
+CREATE TABLE IF NOT EXISTS llm_analyses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id    TEXT NOT NULL,
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+    model       TEXT DEFAULT '',
+    social_json TEXT,           -- Step 1: 社媒需求分析
+    ecom_json   TEXT,           -- Step 2: 电商供给分析
+    cross_json  TEXT,           -- Step 3: 交叉机会分析
+    summary_json TEXT,          -- Step 4: JSON 结构化摘要
+    cost_usd    REAL DEFAULT 0.0,
+    UNIQUE(batch_id)
+);
