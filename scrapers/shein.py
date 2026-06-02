@@ -37,7 +37,10 @@ class SheinScraper(BaseScraper):
         except: return {}
 
     def _search(self, term: str, sort: str = "toprated") -> list[dict]:
-        url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all"
+        if sort == "toprated":
+            url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all&sort=7&source=sort&sourceStatus=1"
+        else:
+            url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all"
         nav = self._opencli("open", url)
         page_id = nav.get("page", "")
         if not page_id:
@@ -56,21 +59,6 @@ class SheinScraper(BaseScraper):
             if isinstance(check2, str) and any(k in check2 for k in ("captcha", "verify", "robot")):
                 logger.error("SHEIN 人机验证无法绕过，跳过该关键词")
                 return []
-
-        # 切换排序为 Top Rated
-        if sort == "toprated":
-            try:
-                # 直接用 JS 点击 Top Rated 选项（<li role=menuitemradio id=sort-option-3>）
-                result = self._opencli("eval", """(() => {
-                  var opt = document.getElementById('sort-option-3');
-                  if (!opt) return 'option not found, current=' + (document.querySelector('[role=combobox]')?.value || '?');
-                  opt.click();
-                  return 'clicked Top Rated';
-                })()""")
-                logger.info(f"SHEIN 排序切换结果: {result}")
-                time.sleep(4)
-            except Exception as e:
-                logger.warning(f"SHEIN 排序切换失败，使用默认排序: {e}")
 
         # 从 JSON-LD 结构化数据提取（含价格）
         raw = self._opencli("eval", """
