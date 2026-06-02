@@ -47,40 +47,43 @@ def get_scraper(source: str, config: dict, batch_id: str, keyword: str, limit: i
     return s
 
 
-def trim_and_save(posts: list, sort: str, limit: int, batch_id: str, keyword: str, conn) -> int:
-    """Over-fetch trim: 按排序裁切后入库"""
+SOCIAL_SOURCES = {"reddit", "twitter", "tiktok"}
+ECOM_SOURCES = {"amazon", "shein"}
+
+
+def trim_and_save(posts: list, sort: str, limit: int, batch_id: str, keyword: str, conn) -> tuple:
+    """Over-fetch trim: 分社媒/电商两路排序后裁切入库"""
     if not posts:
-        return 0
+        return (0, 0)
 
-    # 统一排序
+    social = [p for p in posts if p.source in SOCIAL_SOURCES]
+    ecom = [p for p in posts if p.source in ECOM_SOURCES]
+
+    # 社媒排序：用 CLI 指定的指标
     if sort == "comments":
-        # 电商用 reviews，社媒用 num_comments
-        def sort_key(p):
-            if p.source in ("amazon", "shein"):
-                return p.metadata.get("reviews", 0)
-            return p.num_comments
-        posts.sort(key=sort_key, reverse=True)
-    else:  # likes / score
-        def sort_key(p):
-            if p.source in ("amazon", "shein"):
-                return p.metadata.get("rating", 0) * 1000 + p.metadata.get("reviews", 0)
-            return p.score
-        posts.sort(key=sort_key, reverse=True)
+        social.sort(key=lambda x: x.num_comments, reverse=True)
+    else:
+        social.sort(key=lambda x: x.score, reverse=True)
 
-    final = posts[:limit]
+    # 电商排序：始终按评论数（销量信号），与 CLI sort 无关
+    ecom.sort(key=lambda x: x.metadata.get("reviews", 0), reverse=True)
+
+    saved_social = _save_batch(social[:limit], batch_id, keyword, conn)
+    saved_ecom = _save_batch(ecom[:limit], batch_id, keyword, conn)
+
+    return (saved_social, saved_ecom)
+
+
+def _save_batch(posts: list, batch_id: str, keyword: str, conn) -> int:
+    """批量写入同组帖子"""
     saved = 0
-    for p in final:
+    for p in posts:
         p.batch_id = batch_id
         p.search_keyword = keyword
-        # 先删同 source_id 的旧数据，再插入（避免 UNIQUE 冲突）
         conn.execute("DELETE FROM raw_posts WHERE source=? AND source_id=?", (p.source, p.source_id))
         if insert_raw_post(conn, p.to_dict()):
             saved += 1
     return saved
-
-
-SOCIAL_SOURCES = ["reddit", "twitter", "tiktok"]
-ECOM_SOURCES = ["amazon", "shein"]
 
 
 def main():
@@ -117,8 +120,8 @@ def main():
             posts = scraper.fetch()
             scraper.close()
             saved = trim_and_save(posts, args.sort, args.limit, batch_id, keyword, conn)
-            total += saved
-            print(f"{saved} 条")
+            total += sum(saved)
+            print(f"{saved[0]} 社媒 + {saved[1]} 电商")
         except Exception as e:
             print(f"❌ 失败: {e}")
 
