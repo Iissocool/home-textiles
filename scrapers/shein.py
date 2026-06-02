@@ -59,19 +59,16 @@ class SheinScraper(BaseScraper):
 
         # 切换排序为 Top Rated
         if sort == "toprated":
-            # 打开下拉菜单（CSS 选择器匹配多个，用 --nth 0 取第一个 combobox）
             try:
-                subprocess.run(
-                    ["opencli", "browser", self.session, "click", "--nth", "0", "[role=combobox]"],
-                    capture_output=True, text=True, timeout=15
-                )
-                time.sleep(1.5)
-                subprocess.run(
-                    ["opencli", "browser", self.session, "click", "#sort-option-3"],
-                    capture_output=True, text=True, timeout=15
-                )
-                time.sleep(3)
-                logger.info("SHEIN 排序已切换为 Top Rated")
+                # 直接用 JS 点击 Top Rated 选项（<li role=menuitemradio id=sort-option-3>）
+                result = self._opencli("eval", """(() => {
+                  var opt = document.getElementById('sort-option-3');
+                  if (!opt) return 'option not found, current=' + (document.querySelector('[role=combobox]')?.value || '?');
+                  opt.click();
+                  return 'clicked Top Rated';
+                })()""")
+                logger.info(f"SHEIN 排序切换结果: {result}")
+                time.sleep(4)
             except Exception as e:
                 logger.warning(f"SHEIN 排序切换失败，使用默认排序: {e}")
 
@@ -128,7 +125,7 @@ return "[]";
                 # 修复 SHEIN 图片 URL：去掉 OpenCLI 产生的多余域名，补全协议
                 raw_img = item.get("image", "") or ""
                 if raw_img.startswith("https://us.shein.com/"):
-                    img_url = raw_img.replace("us.shein.com/", "")
+                    img_url = raw_img.replace("us.shein.com/", "").replace("https:///", "https://")
                 elif raw_img.startswith("//"):
                     img_url = "https:" + raw_img
                 else:
