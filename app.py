@@ -163,7 +163,7 @@ class App:
             for r in rows:
                 bid, kw, dt, cnt = r[0], r[1] or "(空)", r[2] or "?", r[3]
                 tag = bid.split("_")[-1] if "_" in bid else ""
-                display_kw = tag.replace("_", " ") if tag else kw
+                display_kw = kw if kw != "(空)" else tag.replace("_", " ")
                 self.tree.insert("", "end", values=(bid[:20], display_kw, dt, cnt))
                 self.batch_ids.append(bid)
 

@@ -18,7 +18,10 @@ else:
 conn = sqlite3.connect(str(DB))
 conn.row_factory = sqlite3.Row
 
-sources = conn.execute("SELECT source, COUNT(*) as cnt FROM raw_posts GROUP BY source").fetchall()
+if batch_filter:
+    sources = conn.execute("SELECT source, COUNT(*) as cnt FROM raw_posts WHERE batch_id=? GROUP BY source", (batch_filter,)).fetchall()
+else:
+    sources = conn.execute("SELECT source, COUNT(*) as cnt FROM raw_posts GROUP BY source").fetchall()
 total = sum(r["cnt"] for r in sources)
 cost = conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM llm_calls").fetchone()[0]
 
@@ -75,6 +78,14 @@ stats_html += f'<div class="s"><div class="sl">花费</div><div class="sv" style
 all_cards = "\n".join(cards_html)
 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
+# 源标签按钮 — 只显示有数据的源
+SOURCE_META = {"reddit": ("🔴", "Reddit"), "twitter": ("🐦", "X"), "tiktok": ("🎵", "TikTok"),
+               "amazon": ("📦", "Amazon"), "shein": ("👗", "SHEIN")}
+sbtns = "\n".join(
+    f'  <button class="btn" data-f="{s}">&#8203;{SOURCE_META[s][0]} {SOURCE_META[s][1]}</button>'
+    for s in sorted(r["source"] for r in sources)
+)
+
 HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -123,11 +134,7 @@ h1{{text-align:center;font-size:20px;margin-bottom:2px}}
 <div class="stats">{stats_html}</div>
 <div class="bar">
   <button class="btn act" data-f="all">📊 全部</button>
-  <button class="btn" data-f="reddit">🔴 Reddit</button>
-  <button class="btn" data-f="twitter">🐦 X</button>
-  <button class="btn" data-f="tiktok">🎵 TikTok</button>
-  <button class="btn" data-f="amazon">📦 Amazon</button>
-  <button class="btn" data-f="shein">👗 SHEIN</button>
+{sbtns}
 </div>
 <div class="ctrl">
   <select id="sort">
