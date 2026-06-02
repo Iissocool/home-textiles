@@ -36,8 +36,8 @@ class SheinScraper(BaseScraper):
             return json.loads(r.stdout) if r.stdout.strip() else {}
         except: return {}
 
-    def _search(self, term: str) -> list[dict]:
-        url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all"
+    def _search(self, term: str, sort: str = "toprated") -> list[dict]:
+        url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all&sort={sort}"
         nav = self._opencli("open", url)
         page_id = nav.get("page", "")
         if not page_id:
