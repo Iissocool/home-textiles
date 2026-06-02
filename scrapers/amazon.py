@@ -59,6 +59,20 @@ class AmazonScraper(BaseScraper):
         self._opencli("tab", "select", page_id)
         time.sleep(5)
 
+        # 切换排序为 Best Sellers
+        try:
+            self._opencli("eval", """(() => {
+              const sel = document.getElementById('s-result-sort-select');
+              if (!sel) return 'no sort select';
+              sel.value = 'exact-aware-popularity-rank';
+              sel.dispatchEvent(new Event('change', {bubbles: true}));
+              return 'switched to Best Sellers';
+            })()""")
+            time.sleep(4)
+            logger.info("Amazon 排序已切换为 Best Sellers")
+        except Exception as e:
+            logger.warning(f"Amazon 排序切换失败，使用默认排序: {e}")
+
         # 提取商品卡片
         raw = self._opencli("eval", """
 Array.from(document.querySelectorAll('[data-component-type=s-search-result]')).slice(0,20).map(el => {
