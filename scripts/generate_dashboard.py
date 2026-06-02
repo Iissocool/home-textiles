@@ -1,10 +1,19 @@
-"""Dashboard v5 — 服务端渲染，稳定可靠"""
-import sqlite3, json, datetime
+"""Dashboard v6 — 支持 --batch 参数生成批次看板"""
+import sqlite3, json, datetime, sys
 from pathlib import Path
 from html import escape
 
 DB = Path(__file__).resolve().parent.parent / "db" / "textiles.db"
-OUT = Path(__file__).resolve().parent.parent / "reports" / "dashboard.html"
+OUT_DIR = Path(__file__).resolve().parent.parent / "reports"
+OUT_DIR.mkdir(exist_ok=True)
+
+# 解析 --batch 参数
+batch_filter = None
+if "--batch" in sys.argv:
+    batch_filter = sys.argv[sys.argv.index("--batch") + 1]
+    OUT = OUT_DIR / f"batch_{batch_filter}.html"
+else:
+    OUT = OUT_DIR / "dashboard.html"
 
 conn = sqlite3.connect(str(DB))
 conn.row_factory = sqlite3.Row
@@ -14,12 +23,19 @@ total = sum(r["cnt"] for r in sources)
 cost = conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM llm_calls").fetchone()[0]
 
 rows = []
-for src in ["amazon", "reddit", "tiktok", "twitter", "shein"]:
+if batch_filter:
     src_rows = conn.execute(
-        "SELECT id,source,title,url,score,num_comments,author,tags,metadata,image_url FROM raw_posts WHERE source=? ORDER BY score DESC LIMIT 30",
-        (src,)
+        "SELECT id,source,title,url,score,num_comments,author,tags,metadata,image_url FROM raw_posts WHERE batch_id=? ORDER BY score DESC LIMIT 150",
+        (batch_filter,)
     ).fetchall()
     rows.extend(src_rows)
+else:
+    for src in ["amazon", "reddit", "tiktok", "twitter", "shein"]:
+        src_rows = conn.execute(
+            "SELECT id,source,title,url,score,num_comments,author,tags,metadata,image_url FROM raw_posts WHERE source=? ORDER BY score DESC LIMIT 30",
+            (src,)
+        ).fetchall()
+        rows.extend(src_rows)
 
 # 预渲染卡片 HTML
 cards_html = []
@@ -125,7 +141,7 @@ h1{{text-align:center;font-size:20px;margin-bottom:2px}}
   <span id="cnt">0</span>
 </div>
 <div id="list">{all_cards}</div>
-<div class="ftr">每源 top 30 · 共 {len(cards_html)} 条 · 刷新页面重新排序</div>
+<div class="ftr">{"" if not batch_filter else f"Batch: {batch_filter} · "}每源 top 30 · 共 {len(cards_html)} 条 · 刷新页面重新排序</div>
 <script>
 function q(s){{return document.querySelector(s)}}
 function qa(s){{return document.querySelectorAll(s)}}
