@@ -1,0 +1,62 @@
+# 需求驱动家纺生态系统 · 配置文件
+# 数据源开关 —— 不需要的源设为 false 即可跳过
+sources:
+  reddit:
+    enabled: true
+    subreddits:
+      - HomeDecorating
+      - Sleep
+      - Bedding
+      - Mattress
+      - InteriorDesign
+    sort: top
+    time_filter: week
+    limit: 50
+
+  pinterest:
+    enabled: true
+    boards: true
+    search_terms:
+      - cooling sheets
+      - bamboo bedding
+      - linen duvet
+      - weighted blanket
+      - bedroom decor 2025
+
+  twitter:
+    enabled: true
+    search_queries:
+      - "cooling sheets"
+      - "bamboo bedding"
+      - "linen sheets"
+      - "weighted blanket"
+    limit: 50
+
+  tiktok:
+    enabled: true
+    hashtags:
+      - bedding
+      - hometextiles
+      - coolingsheets
+      - bedroomdecor
+    limit: 30
+
+  amazon:
+    enabled: true
+    search_terms:
+      - cooling sheets
+      - bamboo bedding
+      - linen duvet cover
+      - weighted blanket
+    limit: 20
+
+# 数据库
+database:
+  path: ../db/textiles.db
+
+# 智能路由器
+router:
+  port: 3645
+  openrouter_model: anthropic/claude-sonnet-4.6
+  openrouter_base: https://openrouter.ai/api/v1
+  schedule: "0 9 * * 1"  # 每周一早上9点
