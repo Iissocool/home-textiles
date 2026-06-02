@@ -37,7 +37,7 @@ class SheinScraper(BaseScraper):
         except: return {}
 
     def _search(self, term: str, sort: str = "toprated") -> list[dict]:
-        url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all&sort={sort}"
+        url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all"
         nav = self._opencli("open", url)
         page_id = nav.get("page", "")
         if not page_id:
@@ -50,13 +50,30 @@ class SheinScraper(BaseScraper):
         if isinstance(check, str) and any(k in check for k in ("captcha", "verify", "robot", "human", "challenge", "security")):
             logger.warning(f"SHEIN 人机验证触发，等待 15 秒后重试...")
             time.sleep(15)
-            # 尝试重新导航
             self._opencli("open", url)
             time.sleep(5)
             check2 = self._opencli("eval", """document.title.toLowerCase()""")
             if isinstance(check2, str) and any(k in check2 for k in ("captcha", "verify", "robot")):
                 logger.error("SHEIN 人机验证无法绕过，跳过该关键词")
                 return []
+
+        # 切换排序为 Top Rated
+        if sort == "toprated":
+            # 打开下拉菜单（CSS 选择器匹配多个，用 --nth 0 取第一个 combobox）
+            try:
+                subprocess.run(
+                    ["opencli", "browser", self.session, "click", "--nth", "0", "[role=combobox]"],
+                    capture_output=True, text=True, timeout=15
+                )
+                time.sleep(1.5)
+                subprocess.run(
+                    ["opencli", "browser", self.session, "click", "#sort-option-3"],
+                    capture_output=True, text=True, timeout=15
+                )
+                time.sleep(3)
+                logger.info("SHEIN 排序已切换为 Top Rated")
+            except Exception as e:
+                logger.warning(f"SHEIN 排序切换失败，使用默认排序: {e}")
 
         # 从 JSON-LD 结构化数据提取（含价格）
         raw = self._opencli("eval", """
