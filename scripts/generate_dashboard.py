@@ -28,7 +28,7 @@ cost = conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM llm_calls").fetchone(
 rows = []
 if batch_filter:
     src_rows = conn.execute(
-        "SELECT id,source,title,url,score,num_comments,author,tags,metadata,image_url FROM raw_posts WHERE batch_id=? ORDER BY score DESC LIMIT 150",
+        "SELECT id,source,title,url,score,num_comments,author,tags,metadata,image_url FROM raw_posts WHERE batch_id=? ORDER BY score DESC LIMIT 500",
         (batch_filter,)
     ).fetchall()
     rows.extend(src_rows)
