@@ -73,11 +73,14 @@ for(var i = 0; i < ss.length; i++) {
       var out = [];
       for(var j = 0; j < entries.length; j++) {
         var item = entries[j].item || entries[j];
+        var rating = item.aggregateRating || {};
         out.push({
           title: (item.name || "").substring(0,200),
           price: item.offers && item.offers.price ? "$" + item.offers.price : "",
           url: item.url || "",
-          image: item.image || ""
+          image: item.image || "",
+          reviews: rating.reviewCount || 0,
+          rating: rating.ratingValue || ""
         });
       }
       return JSON.stringify(out);
@@ -128,7 +131,8 @@ return "[]";
                     author="SHEIN",
                     score=int(price),
                     tags=[term, "shein"],
-                    metadata={"search_term": term, "price": price, "platform": "shein"},
+                    metadata={"search_term": term, "price": price, "platform": "shein",
+                              "reviews": item.get("reviews", 0), "rating": item.get("rating", "")},
                 )
                 all_posts.append(post)
             logger.info(f"SHEIN '{term}': {len(items)} products")
