@@ -101,7 +101,11 @@ return "[]";
                     title=title[:200],
                     content=f"Price: ${price:.2f}",
                     url=item.get("url", ""),
-                    image_url=item.get("image", ""),
+                    image_url=item.get("image", "").replace(
+                        "us.shein.com//img.", "img."  # OpenCLI 解析相对路径产生的多余域名
+                    ).replace(
+                        "//img.ltwebstatic.com", "https://img.ltwebstatic.com"  # 补全协议
+                    ),
                     author="SHEIN",
                     score=int(price),
                     tags=[term, "shein"],

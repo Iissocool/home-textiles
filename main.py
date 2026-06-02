@@ -119,9 +119,12 @@ def main():
             scraper = get_scraper(src, config, batch_id, keyword, args.limit, args.sort)
             posts = scraper.fetch()
             scraper.close()
-            saved = trim_and_save(posts, args.sort, args.limit, batch_id, keyword, conn)
-            total += sum(saved)
-            print(f"{saved[0]} 社媒 + {saved[1]} 电商")
+            if not posts:
+                print(f"📭 0 条（该关键词无匹配结果）")
+            else:
+                saved = trim_and_save(posts, args.sort, args.limit, batch_id, keyword, conn)
+                total += sum(saved)
+                print(f"✅ {len(posts)} 条 ({saved[0]} 社媒 + {saved[1]} 电商)")
         except Exception as e:
             print(f"❌ 失败: {e}")
 

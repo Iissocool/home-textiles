@@ -52,6 +52,18 @@ class RedditScraper(BaseScraper):
         items = data.get("data", [])
         posts = []
         for item in items:
+            # 提取图片：优先 preview 大图，其次 thumbnail
+            preview = item.get("preview", {})
+            image_url = ""
+            if preview:
+                images = preview.get("images", [])
+                if images:
+                    image_url = images[0].get("source", {}).get("url", "").replace("&amp;", "&")
+            if not image_url:
+                image_url = (item.get("thumbnail", "") or "")
+                if image_url in ("self", "default", "nsfw", "spoiler", ""):
+                    image_url = ""
+
             post = RawPost(
                 source="reddit",
                 source_id=f"t3_{item.get('id', '')}",
@@ -62,6 +74,7 @@ class RedditScraper(BaseScraper):
                 score=item.get("score", 0),
                 num_comments=item.get("num_comments", 0),
                 created_utc=item.get("created_utc", 0),
+                image_url=image_url,
                 tags=[sub],
                 metadata={
                     "subreddit": sub,
