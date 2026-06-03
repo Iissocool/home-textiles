@@ -102,9 +102,10 @@ class TwitterScraper(BaseScraper):
                 self._opencli("tab", "select", page_id)
                 time.sleep(5)
 
-                # 滚动加载更多
-                self._opencli("scroll", "down")
-                time.sleep(2)
+                # 滚动加载更多（多次滚动触发懒加载）
+                for s in range(3):
+                    self._opencli("scroll", "down")
+                    time.sleep(2)
 
                 # 从页面提取推文
                 raw = self._opencli("eval", """

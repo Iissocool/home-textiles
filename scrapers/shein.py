@@ -63,8 +63,16 @@ class SheinScraper(BaseScraper):
                 logger.error("SHEIN 人机验证无法绕过，跳过该关键词")
                 return []
 
-        # 从 JSON-LD 结构化数据提取（含价格）
-        raw = self._opencli("eval", """
+        # 从 JSON-LD 结构化数据提取（含价格） — 翻页直到够数据
+        all_items = []
+        max_pages = 3  # 最多翻 3 页
+        for page in range(1, max_pages + 1):
+            if page > 1:
+                page_url = f"https://us.shein.com/pdsearch/{term.replace(' ', '%20')}/?search_source=1&search_type=all&sort=7&source=sort&sourceStatus=1&page={page}"
+                self._opencli("open", page_url)
+                time.sleep(4)
+
+            raw = self._opencli("eval", """
 (function() {
 var ss = document.querySelectorAll("script");
 for(var i = 0; i < ss.length; i++) {
@@ -94,11 +102,17 @@ for(var i = 0; i < ss.length; i++) {
 return "[]";
 })()
 """)
-        if isinstance(raw, str):
-            try: return json.loads(raw)
-            except: return []
-        if isinstance(raw, list): return raw
-        return []
+            if isinstance(raw, str):
+                try: all_items.extend(json.loads(raw))
+                except: pass
+            elif isinstance(raw, list):
+                all_items.extend(raw)
+
+            if len(all_items) >= self.limit:
+                break
+
+        logger.info(f"SHEIN '{term}': {len(all_items)} products across {page} pages")
+        return all_items[:self.limit]
 
     def fetch(self) -> list[RawPost]:
         if not self.session:
