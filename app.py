@@ -130,7 +130,7 @@ class App:
         model_combo.pack(side="left", padx=(2, 6))
         model_combo.bind("<<ComboboxSelected>>", lambda e: self._update_analysis_btn())
 
-        self.analysis_btn = tk.Button(frm, text="🕶️ 分析",
+        self.analysis_btn = tk.Button(frm, text="开始 V4 Pro",
                                       command=self.run_analysis, bg="#334155", fg="#475569",
                                       relief="flat", padx=10, pady=2, state="disabled")
         self.analysis_btn.pack(side="left", padx=2)
@@ -294,12 +294,13 @@ class App:
 
     def _update_analysis_btn(self):
         bid = self._selected_bid()
-        if not bid:
-            self.analysis_btn.config(state="disabled", fg="#475569")
-            return
-        has_analysis = bid in self.analysis_cache
         model_label = {"deepseek": "V4 Pro", "hybrid": "混合", "claude": "Sonnet", "flash": "V4 Flash"}.get(
             self.model_v.get(), "")
+        if not bid:
+            self.analysis_btn.config(state="disabled", fg="#475569",
+                                     text=f"开始 {model_label}")
+            return
+        has_analysis = bid in self.analysis_cache
         self.analysis_btn.config(
             state="normal",
             fg="#60a5fa" if has_analysis else "#94a3b8",
