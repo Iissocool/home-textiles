@@ -119,7 +119,15 @@ class App:
         frm = tk.Frame(bot, bg="#1e293b")
         frm.pack(side="right", padx=6)
 
-        self.analysis_btn = tk.Button(frm, text="🕶️ 市场分析",
+        # 模型选择
+        tk.Label(frm, text="🤖", fg="#64748b", bg="#1e293b").pack(side="left")
+        self.model_v = tk.StringVar(value="deepseek")
+        model_combo = ttk.Combobox(frm, textvariable=self.model_v,
+            values=["deepseek", "hybrid", "claude", "flash"],
+            width=8, state="readonly")
+        model_combo.pack(side="left", padx=(2, 6))
+
+        self.analysis_btn = tk.Button(frm, text="🕶️ 分析",
                                       command=self.run_analysis, bg="#334155", fg="#475569",
                                       relief="flat", padx=10, pady=2, state="disabled")
         self.analysis_btn.pack(side="left", padx=2)
@@ -256,10 +264,11 @@ class App:
             self.analysis_btn.config(state="disabled", fg="#475569")
             return
         has_analysis = bid in self.analysis_cache
+        model_label = {"deepseek": "V4 Pro", "hybrid": "混合", "claude": "Sonnet", "flash": "V4 Flash"}.get(self.model_v.get(), "")
         self.analysis_btn.config(
             state="normal",
             fg="#60a5fa" if has_analysis else "#94a3b8",
-            text="🕶️ 市场分析" if has_analysis else "🕶️ 开始分析"
+            text=f"🕶️ {model_label}" if has_analysis else f"开始 {model_label}"
         )
 
     def open_batch(self, event=None):
@@ -306,7 +315,7 @@ class App:
             try:
                 node = shutil_which("node") or "/usr/bin/node"
                 analysis_js = str(ROOT / "router" / "src" / "analysis.js")
-                out, err = bg([node, analysis_js, "--batch", bid], timeout=300)
+                out, err = bg([node, analysis_js, "--batch", bid, "--model", self.model_v.get()], timeout=300)
 
                 if "分析完成" in out:
                     self.win.after(0, lambda: self.log(f"✅ 分析完成 ({bid})"))

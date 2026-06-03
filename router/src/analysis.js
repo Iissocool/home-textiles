@@ -40,7 +40,37 @@ if (fs.existsSync(envPath)) {
 const Database = require("better-sqlite3");
 import OpenAI from "openai";
 
-const MODEL = process.env.ROUTER_MODEL || "anthropic/claude-sonnet-4.6";
+// 模型配置
+const MODEL_PRESETS = {
+  deepseek: {  // 默认：全链 DeepSeek V4 Pro，性价比最高
+    step1: "deepseek/deepseek-v4-pro", step2: "deepseek/deepseek-v4-pro",
+    step3: "deepseek/deepseek-v4-pro", step4: "deepseek/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+  },
+  claude: {  // 全链 Claude Sonnet 4.6，最贵但推理最强
+    step1: "anthropic/claude-sonnet-4.6", step2: "anthropic/claude-sonnet-4.6",
+    step3: "anthropic/claude-sonnet-4.6", step4: "anthropic/claude-sonnet-4.6",
+    label: "Claude Sonnet 4.6",
+  },
+  hybrid: {  // 混合：非推理步用 DeepSeek，交叉分析用 Claude
+    step1: "deepseek/deepseek-v4-pro", step2: "deepseek/deepseek-v4-pro",
+    step3: "anthropic/claude-sonnet-4.6", step4: "deepseek/deepseek-v4-pro",
+    label: "混合模式 (推荐)",
+  },
+  flash: {  // 最省：全链 DeepSeek V4 Flash
+    step1: "deepseek/deepseek-v4-flash", step2: "deepseek/deepseek-v4-flash",
+    step3: "deepseek/deepseek-v4-flash", step4: "deepseek/deepseek-v4-flash",
+    label: "DeepSeek V4 Flash (最省)",
+  },
+};
+
+// 从 CLI 参数选择预设
+const modelPreset = process.argv.includes("--model")
+  ? (MODEL_PRESETS[process.argv[process.argv.indexOf("--model") + 1]] || MODEL_PRESETS.deepseek)
+  : MODEL_PRESETS.deepseek;
+
+console.log(`   模型预设: ${modelPreset.label}`);
+
 const MAX_BUDGET = 5.0;
 
 const SOCIAL_SOURCES = ["reddit", "tiktok", "twitter"];
@@ -63,11 +93,19 @@ Respond ONLY with valid JSON. No markdown, no explanations outside JSON.`;
 // 工具函数
 // ============================================================
 
-function calcCost(promptTokens, completionTokens) {
-  // Sonnet 4.6: $3/M prompt, $15/M completion
-  const promptPrice = 3 / 1_000_000;
-  const completionPrice = 15 / 1_000_000;
-  return promptTokens * promptPrice + completionTokens * completionPrice;
+function calcCost(model, promptTokens, completionTokens) {
+  // 不同模型不同定价
+  if (model.includes("deepseek-v4-flash")) {
+    const pp = 0.15 / 1_000_000, cp = 0.60 / 1_000_000;
+    return promptTokens * pp + completionTokens * cp;
+  }
+  if (model.includes("deepseek")) {
+    const pp = 0.50 / 1_000_000, cp = 2.00 / 1_000_000;
+    return promptTokens * pp + completionTokens * cp;
+  }
+  // Claude Sonnet 4.6: $3/M prompt, $15/M completion
+  const pp = 3 / 1_000_000, cp = 15 / 1_000_000;
+  return promptTokens * pp + completionTokens * cp;
 }
 
 function logCall(db, model, pt, ct, cost, purpose) {
@@ -82,9 +120,9 @@ function getTotalCost(db) {
   return row.total;
 }
 
-async function llmCall(system, userMsg, maxTokens = 2000) {
+async function llmCall(system, userMsg, model, maxTokens = 2000) {
   const completion = await openai.chat.completions.create({
-    model: MODEL,
+    model: model,
     messages: [
       { role: "system", content: system },
       { role: "user", content: userMsg },
@@ -93,7 +131,7 @@ async function llmCall(system, userMsg, maxTokens = 2000) {
     max_tokens: maxTokens,
   });
   const usage = completion.usage;
-  const cost = calcCost(usage.prompt_tokens, usage.completion_tokens);
+  const cost = calcCost(model, usage.prompt_tokens, usage.completion_tokens);
   const text = completion.choices[0].message.content;
   return { text, cost, usage };
 }
@@ -195,7 +233,7 @@ function buildEcomPrompt(data) {
 // 4 步 prompt 链
 // ============================================================
 
-async function step1_DemandAnalysis(db, data, keyword) {
+async function step1_DemandAnalysis(db, data, keyword, model) {
   console.log("[Analysis] Step 1: Demand Analysis (social)...");
   const socialText = buildSocialPrompt(data);
   const prompt = `Analyze these social media posts about "${keyword}". Identify:
@@ -210,14 +248,14 @@ ${socialText}
 
 Respond with a JSON object with keys: emerging_trends, pain_points, aesthetic_descriptors, sentiment, demand_signal.`;
 
-  const result = await llmCall(SYSTEM_PROMPT, prompt, 3000);
-  logCall(db, MODEL, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step1-demand");
+  const result = await llmCall(SYSTEM_PROMPT, prompt, model, 3000);
+  logCall(db, model, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step1-demand");
   const parsed = parseJSON(result.text);
   console.log(`  → ${parsed.emerging_trends?.length || 0} trends, $${result.cost.toFixed(5)}`);
   return { json: parsed, cost: result.cost };
 }
 
-async function step2_SupplyAnalysis(db, data, keyword) {
+async function step2_SupplyAnalysis(db, data, keyword, model) {
   console.log("[Analysis] Step 2: Supply Analysis (ecom)...");
   const ecomText = buildEcomPrompt(data);
   const prompt = `Analyze these e-commerce product listings for "${keyword}". Identify:
@@ -231,14 +269,14 @@ ${ecomText}
 
 Respond with a JSON object with keys: market_landscape, product_gaps, negative_review_themes, pricing_sweet_spot.`;
 
-  const result = await llmCall(SYSTEM_PROMPT, prompt, 3000);
-  logCall(db, MODEL, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step2-supply");
+  const result = await llmCall(SYSTEM_PROMPT, prompt, model, 3000);
+  logCall(db, model, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step2-supply");
   const parsed = parseJSON(result.text);
   console.log(`  → ${parsed.product_gaps?.length || 0} gaps, $${result.cost.toFixed(5)}`);
   return { json: parsed, cost: result.cost };
 }
 
-async function step3_CrossReference(db, demand, supply) {
+async function step3_CrossReference(db, demand, supply, model) {
   console.log("[Analysis] Step 3: Cross-reference...");
   const prompt = `You have two analysis outputs. Cross-reference them to identify product opportunities.
 
@@ -264,14 +302,14 @@ Identify:
 
 Respond with a JSON object with keys: gap_opportunities, top_recommendation, summary.`;
 
-  const result = await llmCall(SYSTEM_PROMPT, prompt, 3000);
-  logCall(db, MODEL, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step3-crossref");
+  const result = await llmCall(SYSTEM_PROMPT, prompt, model, 3000);
+  logCall(db, model, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step3-crossref");
   const parsed = parseJSON(result.text);
   console.log(`  → ${parsed.gap_opportunities?.length || 0} opportunities, $${result.cost.toFixed(5)}`);
   return { json: parsed, cost: result.cost };
 }
 
-async function step4_StructuredSummary(db, cross) {
+async function step4_StructuredSummary(db, cross, model) {
   console.log("[Analysis] Step 4: Structured summary...");
   const prompt = `Extract a minimal structured summary from this gap analysis.
 
@@ -288,8 +326,8 @@ Output ONLY a JSON object with these exact keys:
   "summary_note": "one-liner"
 }`;
 
-  const result = await llmCall(SYSTEM_PROMPT, prompt, 1500);
-  logCall(db, MODEL, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step4-summary");
+  const result = await llmCall(SYSTEM_PROMPT, prompt, model, 1500);
+  logCall(db, model, result.usage.prompt_tokens, result.usage.completion_tokens, result.cost, "analysis-step4-summary");
   const parsed = parseJSON(result.text);
   console.log(`  → Summary, $${result.cost.toFixed(5)}`);
   return { json: parsed, cost: result.cost };
@@ -483,7 +521,8 @@ async function main() {
 
   console.log(`\n🕶️  Black Pearl · 市场分析引擎`);
   console.log(`   Batch: ${batchId}`);
-  console.log(`   Model: ${MODEL}\n`);
+  console.log(`   预设: ${modelPreset.label}`);
+  console.log(`   SS: ${modelPreset.step1}  Ecom: ${modelPreset.step2}  Xref: ${modelPreset.step3}  Sum: ${modelPreset.step4}\n`);
 
   if (!process.env.OPENROUTER_API_KEY) {
     console.error("❌ OPENROUTER_API_KEY not set");
@@ -525,19 +564,19 @@ async function main() {
     process.exit(1);
   }
 
-  // 2. 执行 4 步分析
+  // 2. 执行 4 步分析（每步使用预设的模型）
   let totalCost = 0;
 
-  const r1 = await step1_DemandAnalysis(db, data, keyword);
+  const r1 = await step1_DemandAnalysis(db, data, keyword, modelPreset.step1);
   totalCost += r1.cost;
 
-  const r2 = await step2_SupplyAnalysis(db, data, keyword);
+  const r2 = await step2_SupplyAnalysis(db, data, keyword, modelPreset.step2);
   totalCost += r2.cost;
 
-  const r3 = await step3_CrossReference(db, r1.json, r2.json);
+  const r3 = await step3_CrossReference(db, r1.json, r2.json, modelPreset.step3);
   totalCost += r3.cost;
 
-  const r4 = await step4_StructuredSummary(db, r3.json);
+  const r4 = await step4_StructuredSummary(db, r3.json, modelPreset.step4);
   totalCost += r4.cost;
 
   console.log(`\n💰 总成本: $${totalCost.toFixed(5)}`);
@@ -550,7 +589,7 @@ async function main() {
      VALUES (?, unixepoch(), ?, ?, ?, ?, ?, ?)`
   ).run(
     batchId,
-    MODEL,
+    modelPreset.step3,  // 用 Step3 的模型名记录（最贵的那个）
     JSON.stringify(r1.json),
     JSON.stringify(r2.json),
     JSON.stringify(r3.json),
