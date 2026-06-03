@@ -1,6 +1,6 @@
 """
-跨境产品情报 · 桌面助手 v4
-按批次管理搜索记录，可选择数据源，复制批次号
+跨境产品情报 · 桌面助手 v5
+开源采集 x OpenCLI x 智能分析
 """
 import tkinter as tk
 from tkinter import ttk
@@ -25,7 +25,6 @@ def bg(cmd, timeout=300):
 
 
 def short_bid(bid):
-    """展示用截短：只保留 月日_时分_关键词 部分"""
     parts = bid.split("_")
     if len(parts) >= 3:
         return f"{parts[0]}_{parts[1]}_{parts[-1]}"
@@ -36,7 +35,7 @@ class App:
     def __init__(self):
         self.win = tk.Tk()
         self.win.title("🌐 跨境产品情报助手")
-        self.win.geometry("720x540")
+        self.win.geometry("740x560")
         self.win.configure(bg="#0f172a")
         self.win.option_add("*Font", ("Segoe UI", 10))
 
@@ -82,13 +81,12 @@ class App:
                                 relief="flat", bd=0, padx=0, highlightthickness=0)
             cb.pack(side="left", padx=(6, 0))
 
-        # ── 搜索记录标题 ──
+        # ── 搜索记录 ──
         hdr = tk.Frame(self.win, bg=self.bg)
         hdr.pack(fill="x", padx=14, pady=(6, 2))
         tk.Label(hdr, text="📋 搜索记录", fg="#94a3b8",
                  font=(None, 11, "bold"), bg=self.bg).pack(side="left")
 
-        # ── 记录列表 ──
         lst_frame = tk.Frame(self.win, bg=self.bg)
         lst_frame.pack(fill="both", expand=True, padx=14, pady=(0, 6))
 
@@ -107,7 +105,7 @@ class App:
         self.tree.bind("<Double-1>", self.open_batch)
         self.tree.bind("<Return>", self.open_batch)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
-        self.tree.bind("<Button-3>", self.copy_bid)  # 右键复制
+        self.tree.bind("<Button-3>", self.copy_bid)
 
         # ── 底部按钮 ──
         bot = tk.Frame(self.win, bg="#1e293b")
@@ -116,10 +114,14 @@ class App:
         self.stat = tk.Label(bot, text="就绪", fg="#64748b", bg="#1e293b")
         self.stat.pack(side="left", padx=10, pady=5)
 
+        # OpenCLI 状态指示灯
+        self.ocli_status = tk.Label(bot, text="⚪", fg="#475569", bg="#1e293b",
+                                     font=(None, 14))
+        self.ocli_status.pack(side="left", padx=2)
+
         frm = tk.Frame(bot, bg="#1e293b")
         frm.pack(side="right", padx=6)
 
-        # 模型选择
         tk.Label(frm, text="🤖", fg="#64748b", bg="#1e293b").pack(side="left")
         self.model_v = tk.StringVar(value="deepseek")
         model_combo = ttk.Combobox(frm, textvariable=self.model_v,
@@ -143,12 +145,30 @@ class App:
         self.analysis_cache = set()
         self.win.bind("<Escape>", lambda e: self.win.quit())
         self.refresh()
+        # 异步检查 OpenCLI 状态
+        threading.Thread(target=self._check_opencli, daemon=True).start()
 
     # ───────── 方法 ─────────
 
     def log(self, msg):
         self.stat.config(text=msg)
         self.win.update_idletasks()
+
+    def _check_opencli(self):
+        """后台检测 OpenCLI 连接状态"""
+        try:
+            r = subprocess.run(["opencli", "doctor"], capture_output=True, text=True, timeout=15)
+            if "Extension: connected" in r.stdout:
+                self.win.after(0, lambda: self.ocli_status.config(
+                    text="🟢", fg="#34d399"))
+                self.win.after(0, lambda: self.log("🟢 OpenCLI 已连接"))
+            else:
+                self.win.after(0, lambda: self.ocli_status.config(
+                    text="🔴", fg="#f87171"))
+                self.win.after(0, lambda: self.log("🔴 OpenCLI 未连接"))
+        except Exception:
+            self.win.after(0, lambda: self.ocli_status.config(
+                text="🔴", fg="#f87171"))
 
     def _selected_bid(self):
         sel = self.tree.selection()
@@ -157,18 +177,10 @@ class App:
         idx = self.tree.index(sel[0])
         return self.batch_ids[idx] if idx < len(self.batch_ids) else None
 
-    def _selected_bid_short(self):
-        sel = self.tree.selection()
-        if not sel:
-            return ""
-        vals = self.tree.item(sel[0], "values")
-        return vals[0] if vals else ""
-
     def search(self):
         kw = self.kw.get().strip()
         if not kw:
             return self.log("⚠️ 输入关键词")
-        # 收集选中的源
         selected = [k for k, v in self.src_vars.items() if v.get()]
         if not selected:
             return self.log("⚠️ 至少勾选一个数据源")
@@ -178,11 +190,23 @@ class App:
         self.log(f"🔍 搜索: {kw} ({len(selected)} 源)")
 
         def work():
+            new_bid = None
             try:
                 sort, limit = self.sort_v.get(), self.limit_v.get()
-                bg([sys.executable, "main.py", "--keyword", kw,
+                self.win.after(0, lambda: self.log(f"🔍 {kw} — 正在抓取..."))
+
+                out, err = bg([sys.executable, "main.py", "--keyword", kw,
                      "--sort", sort, "--limit", limit,
                      "--sources", sources_str])
+
+                # 解析进度（提取各源结果）
+                for line in out.split("\n"):
+                    m = re.search(r"📡 抓取 (\w+)", line)
+                    if m:
+                        self.win.after(0, lambda s=m.group(1): self.log(f"📡 抓取 {s}..."))
+                    m2 = re.search(r"✅ (\d+) 条", line)
+                    if m2:
+                        self.win.after(0, lambda n=m2.group(1): self.log(f"✅ {n} 条完成"))
 
                 # 生成批次看板
                 conn = sqlite3.connect(str(ROOT / "db" / "textiles.db"))
@@ -194,10 +218,12 @@ class App:
                 conn.close()
 
                 if row:
-                    bid = row[0]
-                    bg([sys.executable, "scripts/generate_dashboard.py", "--batch", bid])
-                    self.win.after(0, self.refresh)
-                    self.win.after(0, lambda: self.log(f"✅ {kw} 完成，双击记录打开看板"))
+                    new_bid = row[0]
+                    self.win.after(0, lambda: self.log(f"📄 生成看板: {new_bid}"))
+                    bg([sys.executable, "scripts/generate_dashboard.py", "--batch", new_bid])
+
+                    self.win.after(0, lambda: self.refresh(highlight_bid=new_bid))
+                    self.win.after(0, lambda: self.log(f"✅ {kw} 完成（{new_bid}）双击记录打开看板"))
                 else:
                     self.win.after(0, lambda: self.log("⚠️ 未找到批次数据"))
             except Exception as e:
@@ -206,7 +232,7 @@ class App:
 
         threading.Thread(target=work, daemon=True).start()
 
-    def refresh(self):
+    def refresh(self, highlight_bid=None):
         self.tree.delete(*self.tree.get_children())
         self.batch_ids.clear()
         self.analysis_cache.clear()
@@ -224,7 +250,6 @@ class App:
                 LIMIT 50
             """).fetchall()
 
-            # 查哪些 batch 已有分析
             bids = [r[0] for r in rows]
             if bids:
                 placeholders = ",".join("?" for _ in bids)
@@ -237,13 +262,22 @@ class App:
                 self.analysis_cache = analyzed
             conn.close()
 
-            for r in rows:
+            highlight_row = None
+            for i, r in enumerate(rows):
                 bid, kw, dt, cnt = r[0], r[1] or "(空)", r[2] or "?", r[3]
                 tag = bid.split("_")[-1] if "_" in bid else ""
                 display_kw = kw if kw != "(空)" else tag.replace("_", " ")
                 display_bid = short_bid(bid)
-                self.tree.insert("", "end", values=(display_bid, display_kw, dt, cnt))
+                item_id = self.tree.insert("", "end", values=(display_bid, display_kw, dt, cnt))
                 self.batch_ids.append(bid)
+                if highlight_bid and bid == highlight_bid:
+                    highlight_row = item_id
+
+            # 高亮刚生成的批次
+            if highlight_row:
+                self.tree.selection_set(highlight_row)
+                self.tree.focus(highlight_row)
+                self.tree.see(highlight_row)
 
             self.log(f"📋 {len(rows)} 条搜索记录")
         except Exception as e:
@@ -253,7 +287,6 @@ class App:
 
     def on_select(self, event=None):
         self._update_analysis_btn()
-        # 在状态栏显示完整批次号
         bid = self._selected_bid()
         if bid:
             self.log(f"📋 {bid}")
@@ -264,7 +297,8 @@ class App:
             self.analysis_btn.config(state="disabled", fg="#475569")
             return
         has_analysis = bid in self.analysis_cache
-        model_label = {"deepseek": "V4 Pro", "hybrid": "混合", "claude": "Sonnet", "flash": "V4 Flash"}.get(self.model_v.get(), "")
+        model_label = {"deepseek": "V4 Pro", "hybrid": "混合", "claude": "Sonnet", "flash": "V4 Flash"}.get(
+            self.model_v.get(), "")
         self.analysis_btn.config(
             state="normal",
             fg="#60a5fa" if has_analysis else "#94a3b8",
@@ -307,7 +341,6 @@ class App:
             self.log(f"📂 打开分析报告: {bid}")
             return
 
-        # 开始分析
         self.analysis_btn.config(state="disabled", text="⏳ 分析中...")
         self.log(f"🕶️ 市场分析: {bid}...")
 
@@ -315,7 +348,8 @@ class App:
             try:
                 node = shutil_which("node") or "/usr/bin/node"
                 analysis_js = str(ROOT / "router" / "src" / "analysis.js")
-                out, err = bg([node, analysis_js, "--batch", bid, "--model", self.model_v.get()], timeout=300)
+                out, err = bg([node, analysis_js, "--batch", bid, "--model", self.model_v.get()],
+                              timeout=300)
 
                 if "分析完成" in out:
                     self.win.after(0, lambda: self.log(f"✅ 分析完成 ({bid})"))
@@ -327,7 +361,9 @@ class App:
                     self.win.after(0, lambda: self.log(f"❌ 分析异常，请查看输出"))
             except Exception as e:
                 self.win.after(0, lambda: self.log(f"❌ 分析异常: {e}"))
-            self.win.after(0, lambda: self.analysis_btn.config(text="🕶️ " + {"deepseek":"V4 Pro","hybrid":"混合","claude":"Sonnet","flash":"V4 Flash"}.get(self.model_v.get(), "")))
+            model_label = {"deepseek": "V4 Pro", "hybrid": "混合", "claude": "Sonnet", "flash": "V4 Flash"}.get(
+                self.model_v.get(), "")
+            self.win.after(0, lambda: self.analysis_btn.config(text="🕶️ " + model_label))
 
         threading.Thread(target=work, daemon=True).start()
 
