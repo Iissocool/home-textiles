@@ -128,6 +128,7 @@ class App:
             values=["deepseek", "hybrid", "claude", "flash"],
             width=8, state="readonly")
         model_combo.pack(side="left", padx=(2, 6))
+        model_combo.bind("<<ComboboxSelected>>", lambda e: self._update_analysis_btn())
 
         self.analysis_btn = tk.Button(frm, text="🕶️ 分析",
                                       command=self.run_analysis, bg="#334155", fg="#475569",
