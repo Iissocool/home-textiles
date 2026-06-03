@@ -1,18 +1,12 @@
 """
-需求驱动家纺生态系统 · X (Twitter) 爬虫
+跨境产品 · X (Twitter) 爬虫 (OpenCLI 版)
 
 数据源优先级：
-  1. GetXAPI（推荐）— $0.001/次搜索，注册送 $0.1（≈100次/2000条推）
-  2. X API v2 免费版（1500 条/月，仅限 Basic tier+）
-  3. Nitter RSS（已失效，作 fallback）
-
-GetXAPI 接入：
-  1. 访问 https://www.getxapi.com/signup
-  2. 注册 → 拿 API Key
-  3. 设置环境变量：export X_API_KEY="your_key"
+  1. OpenCLI + 已登录 Chromium（通过浏览器搜索 X.com）
+  2. GetXAPI（fallback，需 X_API_KEY）
+  3. X API v2（fallback，需 X_BEARER_TOKEN）
 """
-import os
-import time
+import os, time, re, json
 from typing import Optional
 
 import httpx
@@ -22,37 +16,65 @@ from .base import BaseScraper, RawPost
 
 GETXAPI_BASE = "https://api.getxapi.com"
 X_API_V2 = "https://api.twitter.com/2"
-NITTER_INSTANCES = [
-    "https://nitter.net",
-    "https://nitter.privacydev.net",
-    "https://nitter.woodland.cafe",
-]
 
 
 class TwitterScraper(BaseScraper):
-    """X/Twitter 爬虫"""
+    """X/Twitter 爬虫 — 优先 OpenCLI + 已登录 Chromium"""
 
     def __init__(self, config: dict):
         super().__init__(config)
         self.source_name = "twitter"
         self.search_queries = config.get("search_queries", [])
-        self.limit = min(config.get("limit", 50), 100)
+        self.limit = min(config.get("limit", 30), 50)
         self.getxapi_key = os.environ.get("X_API_KEY", "")
         self.bearer_token = os.environ.get("X_BEARER_TOKEN", "")
         self._client = httpx.Client(timeout=20)
+        # OpenCLI session
+        self.session = config.get("opencli_session", self._detect_session())
+
+    def _detect_session(self) -> Optional[str]:
+        try:
+            r = __import__("subprocess").run(
+                ["opencli", "profile", "list"],
+                capture_output=True, text=True, timeout=10
+            )
+            for line in r.stdout.split("\n"):
+                m = __import__("re").search(r"(\w+)\s*[—–-]\s*connected", line)
+                if m:
+                    return m.group(1)
+        except Exception as e:
+            logger.warning(f"OpenCLI session detection failed: {e}")
+        return None
+
+    def _opencli(self, *args: str):
+        """执行 OpenCLI 命令"""
+        import subprocess, json
+        if not self.session:
+            return {}
+        cmd = ["opencli", "browser", self.session] + list(args)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                return {}
+            return json.loads(r.stdout) if r.stdout.strip() else {}
+        except json.JSONDecodeError:
+            return {}
+        except Exception as e:
+            logger.warning(f"OpenCLI error: {e}")
+            return {}
 
     def fetch(self) -> list[RawPost]:
         posts = []
 
-        # 策略 1: GetXAPI（推荐，只需 API Key）
-        if self.getxapi_key:
+        # 策略 1: OpenCLI + 已登录 Chromium
+        if self.session:
+            posts = self._fetch_opencli()
+        # 策略 2: GetXAPI（fallback）
+        if not posts and self.getxapi_key:
             posts = self._fetch_getxapi()
-        # 策略 2: X API v2 Bearer Token
-        elif self.bearer_token:
+        # 策略 3: X API v2 Bearer Token（fallback）
+        if not posts and self.bearer_token:
             posts = self._fetch_xapi_v2()
-        # 策略 3: Nitter（基本已失效）
-        else:
-            posts = self._fetch_nitter()
 
         seen = set()
         unique = []
@@ -64,8 +86,128 @@ class TwitterScraper(BaseScraper):
         logger.info(f"X/Twitter: {len(unique)} unique tweets")
         return unique
 
+    def _fetch_opencli(self) -> list[RawPost]:
+        """通过 OpenCLI + Chrome 搜索 X.com"""
+        all_posts = []
+
+        for query in self.search_queries:
+            try:
+                # 搜索 X
+                search_url = f"https://x.com/search?q={query.replace(' ', '%20')}&src=typed_query&f=top"
+                nav = self._opencli("open", search_url)
+                page_id = nav.get("page", "")
+                if not page_id:
+                    logger.warning(f"X OpenCLI: 无法打开搜索页")
+                    continue
+                self._opencli("tab", "select", page_id)
+                time.sleep(5)
+
+                # 滚动加载更多
+                self._opencli("scroll", "down")
+                time.sleep(2)
+
+                # 从页面提取推文
+                raw = self._opencli("eval", """
+(() => {
+  // X.com 推文容器
+  var articles = document.querySelectorAll('article[data-testid="tweet"]');
+  var out = [];
+  for(var i = 0; i < Math.min(articles.length, 50); i++) {
+    var art = articles[i];
+    // 推文文本
+    var textEl = art.querySelector('[data-testid="tweetText"]');
+    var text = textEl ? textEl.textContent.trim() : '';
+    // 用户名
+    var userEl = art.querySelector('[data-testid="User-Name"] a');
+    var username = userEl ? userEl.textContent.trim() : '';
+    // 链接
+    var linkEl = art.querySelector('a[href*="/status/"]');
+    var link = linkEl ? linkEl.href : '';
+    var tweetId = link ? link.split('/status/')[1]?.split('?')[0] || '' : '';
+    // 互动数据
+    var likes = 0;
+    var replies = 0;
+    var retweets = 0;
+    var likeBtn = art.querySelector('[data-testid="like"]');
+    if(likeBtn) {
+      var likeLabel = likeBtn.getAttribute('aria-label') || '';
+      var m = likeLabel.match(/([\\d,]+)/);
+      if(m) likes = parseInt(m[1].replace(/,/g,'')) || 0;
+    }
+    var replyBtn = art.querySelector('[data-testid="reply"]');
+    if(replyBtn) {
+      var replyLabel = replyBtn.getAttribute('aria-label') || '';
+      var m = replyLabel.match(/([\\d,]+)/);
+      if(m) replies = parseInt(m[1].replace(/,/g,'')) || 0;
+    }
+    var retweetBtn = art.querySelector('[data-testid="retweet"]');
+    if(retweetBtn) {
+      var retweetLabel = retweetBtn.getAttribute('aria-label') || '';
+      var m = retweetLabel.match(/([\\d,]+)/);
+      if(m) retweets = parseInt(m[1].replace(/,/g,'')) || 0;
+    }
+    // 图片
+    var imgs = art.querySelectorAll('img[alt="Image"]');
+    var imgUrl = imgs.length > 0 ? imgs[0].src : '';
+    if(imgUrl && imgUrl.includes('twimg.com')) {
+      // Twitter 图片，保留
+    } else {
+      imgUrl = '';
+    }
+
+    if(text || tweetId) {
+      out.push({
+        id: tweetId || 'x_' + i + '_' + Date.now(),
+        text: text.substring(0,2000),
+        username: username,
+        url: link || ('https://x.com/i/web/status/' + tweetId),
+        likes: likes,
+        replies: replies,
+        retweets: retweets,
+        img: imgUrl
+      });
+    }
+  }
+  return JSON.stringify(out);
+})()
+""")
+                if not raw:
+                    logger.info(f"X OpenCLI '{query}': 未找到推文")
+                    continue
+
+                tweets = raw if isinstance(raw, list) else []
+                if isinstance(raw, dict) and "raw" in raw:
+                    try:
+                        tweets = json.loads(raw["raw"])
+                    except:
+                        tweets = []
+
+                for tw in tweets:
+                    post = RawPost(
+                        source="twitter",
+                        source_id=f"xcli_{tw.get('id','')}",
+                        title=tw.get("text", "")[:200],
+                        content=tw.get("text", "")[:2000],
+                        url=tw.get("url", ""),
+                        image_url=tw.get("img", ""),
+                        author=tw.get("username", "unknown")[:15],
+                        score=tw.get("likes", 0),
+                        num_comments=tw.get("replies", 0) + tw.get("retweets", 0),
+                        tags=[query],
+                        metadata={"source": "opencli"},
+                    )
+                    all_posts.append(post)
+
+                logger.info(f"X OpenCLI '{query}': {len(tweets)} tweets")
+
+            except Exception as e:
+                logger.warning(f"X OpenCLI '{query}' failed: {e}")
+                continue
+
+        return all_posts
+
     def _fetch_getxapi(self) -> list[RawPost]:
-        """通过 GetXAPI 搜索"""
+        """通过 GetXAPI 搜索（原实现）"""
         headers = {"Authorization": f"Bearer {self.getxapi_key}"}
         all_posts = []
 
@@ -106,19 +248,17 @@ class TwitterScraper(BaseScraper):
                                 or tw.get("retweet_count", tw.get("retweetCount", 0)))
                     replies = metrics.get("reply_count", metrics.get("replies", 0)) or tw.get("replyCount", 0)
 
-                    # 尝试多种时间戳格式
                     created_at = 0
                     raw_time = tw.get("created_at", "")
                     if raw_time:
                         try:
-                            import datetime
-                            # X API 格式: "Wed Jun 01 00:00:00 +0000 2026"
-                            dt = datetime.datetime.strptime(raw_time, "%a %b %d %H:%M:%S %z %Y")
+                            from datetime import datetime
+                            dt = datetime.strptime(raw_time, "%a %b %d %H:%M:%S %z %Y")
                             created_at = int(dt.timestamp())
                         except ValueError:
                             try:
-                                import datetime
-                                dt = datetime.datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                                from datetime import datetime
+                                dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
                                 created_at = int(dt.timestamp())
                             except:
                                 created_at = int(time.time())
@@ -149,7 +289,7 @@ class TwitterScraper(BaseScraper):
         return all_posts
 
     def _fetch_xapi_v2(self) -> list[RawPost]:
-        """通过 X API v2 Bearer Token"""
+        """通过 X API v2（原实现）"""
         headers = {"Authorization": f"Bearer {self.bearer_token}"}
         all_posts = []
 
@@ -178,10 +318,10 @@ class TwitterScraper(BaseScraper):
 
                 for tw in tweets:
                     metrics = tw.get("public_metrics", {})
-                    from datetime import datetime
                     created_utc = 0
                     if tw.get("created_at"):
                         try:
+                            from datetime import datetime
                             dt = datetime.fromisoformat(tw["created_at"].replace("Z", "+00:00"))
                             created_utc = int(dt.timestamp())
                         except:
@@ -207,50 +347,6 @@ class TwitterScraper(BaseScraper):
 
             except Exception as e:
                 logger.warning(f"X API '{query}' failed: {e}")
-
-        return all_posts
-
-    def _fetch_nitter(self) -> list[RawPost]:
-        """通过 Nitter RSS（fallback，基本已失效）"""
-        all_posts = []
-        for query in self.search_queries:
-            for instance in NITTER_INSTANCES:
-                try:
-                    url = f"{instance}/search/rss?q={query.replace(' ', '%20')}"
-                    resp = httpx.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-                    if resp.status_code != 200 or len(resp.content) < 100:
-                        continue
-
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(resp.content)
-                    ns = {"atom": "http://www.w3.org/2005/Atom"}
-                    entries = root.findall(".//atom:entry", ns) or root.findall("entry")
-
-                    for entry in entries[:self.limit]:
-                        title = entry.findtext("title", "")
-                        link = entry.findtext("link", "")
-                        entry_id = entry.findtext("id", "") or link
-                        content = entry.findtext("content", "")[:1000]
-
-                        post = RawPost(
-                            source="twitter",
-                            source_id=entry_id,
-                            title=title[:200],
-                            content=content,
-                            url=link,
-                            author="nitter",
-                            score=0, num_comments=0,
-                            tags=[query],
-                            metadata={"source": "nitter", "instance": instance},
-                        )
-                        all_posts.append(post)
-
-                    if all_posts:
-                        logger.info(f"Nitter '{query}': {len(entries)} tweets")
-                        break
-                except Exception:
-                    continue
-                time.sleep(0.5)
 
         return all_posts
 
