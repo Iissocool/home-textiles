@@ -45,7 +45,7 @@ class BaseScraper(ABC):
         self.source_name = ""  # 子类覆写
 
     @abstractmethod
-    async def fetch(self) -> list[RawPost]:
+    def fetch(self) -> list[RawPost]:
         """抓取并返回归一化的帖子列表"""
         ...
 

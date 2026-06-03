@@ -33,8 +33,11 @@ class SheinScraper(BaseScraper):
         cmd = ["opencli", "browser", self.session] + list(args)
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                return {}
             return json.loads(r.stdout) if r.stdout.strip() else {}
-        except: return {}
+        except Exception:
+            return {}
 
     def _search(self, term: str, sort: str = "toprated") -> list[dict]:
         if sort == "toprated":

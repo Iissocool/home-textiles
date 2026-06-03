@@ -327,7 +327,7 @@ class App:
                     self.win.after(0, lambda: self.log(f"❌ 分析异常，请查看输出"))
             except Exception as e:
                 self.win.after(0, lambda: self.log(f"❌ 分析异常: {e}"))
-            self.win.after(0, lambda: self.analysis_btn.config(text="🕶️ 市场分析"))
+            self.win.after(0, lambda: self.analysis_btn.config(text="🕶️ " + {"deepseek":"V4 Pro","hybrid":"混合","claude":"Sonnet","flash":"V4 Flash"}.get(self.model_v.get(), "")))
 
         threading.Thread(target=work, daemon=True).start()
 

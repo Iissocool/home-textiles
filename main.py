@@ -135,7 +135,7 @@ def main():
 
     # 输出后续命令
     print(f"\n📋 后续操作:")
-    print(f"  LLM 分析:  node router/src/router.js --batch {batch_id}")
+    print(f"  LLM 分析:  node router/src/analysis.js --batch {batch_id} --model deepseek")
     print(f"  刷新看板:  python scripts/generate_dashboard.py --batch {batch_id}")
     print()
 
